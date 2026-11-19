@@ -120,13 +120,15 @@ export function chronologyErrors(
 ): { hard: string[]; overridable: string[] } {
   const hard: string[] = [];
   const overridable: string[] = [];
+  // Times are entered to the minute, so compare at minute precision.
+  const min = (x: string | number) => Math.floor((typeof x === "number" ? x : Date.parse(x)) / 60000);
   const t = Date.parse(occurredAt);
   const now = Date.parse(opts.now ?? new Date().toISOString());
   if (!isFinite(t)) return { hard: ["Enter a valid date and time."], overridable };
-  if (t > now + 60_000) hard.push("The date can't be in the future.");
-  if (t < Date.parse(req.receivedAt)) overridable.push("It's earlier than when the requisition was received.");
-  else if (t < Date.parse(req.entryAt)) overridable.push("It's earlier than when the requisition was entered in Nebula.");
-  else if (req.firstValidatedAt && t < Date.parse(req.firstValidatedAt)) overridable.push("It's earlier than when the requisition was first validated.");
+  if (min(t) > min(now)) hard.push("The date can't be in the future.");
+  if (min(t) < min(req.receivedAt)) overridable.push("It's earlier than when the requisition was received.");
+  else if (min(t) < min(req.entryAt)) overridable.push("It's earlier than when the requisition was entered in Nebula.");
+  else if (req.firstValidatedAt && min(t) < min(req.firstValidatedAt)) overridable.push("It's earlier than when the requisition was first validated.");
 
   const masked: Requisition = opts.ignoreEventId
     ? { ...req, events: Object.fromEntries(Object.entries(req.events).filter(([id]) => id !== opts.ignoreEventId)) }
@@ -136,8 +138,8 @@ export function chronologyErrors(
     if (i === idx) return;
     const occ = stageOccurrence(masked, s);
     if (!occ) return;
-    if (i < idx && t < Date.parse(occ)) hard.push(`It's earlier than ${STAGE_LABEL[s]} (${occ.slice(0, 16).replace("T", " ")} UTC).`);
-    if (i > idx && t > Date.parse(occ)) hard.push(`It's later than ${STAGE_LABEL[s]}, which is already recorded.`);
+    if (i < idx && min(t) < min(occ)) hard.push(`It's earlier than ${STAGE_LABEL[s]} (${occ.slice(0, 16).replace("T", " ")} UTC).`);
+    if (i > idx && min(t) > min(occ)) hard.push(`It's later than ${STAGE_LABEL[s]}, which is already recorded.`);
   });
   return { hard, overridable: opts.override ? [] : overridable };
 }

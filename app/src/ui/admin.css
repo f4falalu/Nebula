@@ -1,0 +1,19 @@
+/* Administration, approvals and audit log */
+.admin-stat-btn { text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.admin-stat-btn:hover { border-color: var(--accent); }
+.admin-filter { max-width: 320px; flex: 1; min-width: 0; }
+.admin-csv { min-height: 140px; font-size: 0.85rem; }
+.admin-preview { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r); }
+.admin-x { padding: 0 4px; margin-left: 2px; line-height: 1; }
+.admin-big { font-family: var(--font-head); font-size: 1.6rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.admin-fieldset { border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; margin: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.admin-fieldset legend { padding: 0 4px; color: var(--fg-2); font-weight: 500; }
+
+.appr-card { border-left: 3px solid var(--warn); }
+.appr-changes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.appr-changes li { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: 4px 12px; padding: 6px 10px; background: var(--surface-2); border-radius: var(--r); }
+.appr-field { font-weight: 500; font-size: 0.88rem; }
+@media (max-width: 560px) { .appr-changes li { grid-template-columns: minmax(0, 1fr); } }
+
+.audit-json { margin: 0; padding: 8px 10px; background: var(--surface-2); border-radius: var(--r); font-family: var(--font-mono); font-size: 0.78rem; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+.audit-id { font-size: 0.72rem; overflow-wrap: anywhere; max-width: 180px; }

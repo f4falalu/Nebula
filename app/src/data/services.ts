@@ -463,7 +463,7 @@ export class Services {
     if (!(input.quantity >= 0) || !isFinite(input.quantity)) throw new UserError("Enter a quantity of 0 or more.");
     if (!input.unit) throw new UserError("Enter the unit.");
     if (Date.parse(input.occurredAt) > Date.now() + 60_000) throw new UserError("The date can't be in the future.");
-    if (Date.parse(input.occurredAt) < Date.parse(r.receivedAt)) throw new UserError("The date can't be earlier than when the requisition was received.");
+    if (Math.floor(Date.parse(input.occurredAt) / 60000) < Math.floor(Date.parse(r.receivedAt) / 60000)) throw new UserError("The date can't be earlier than when the requisition was received.");
     const line = input.lineId ? r.lines[input.lineId] : null;
     if (input.lineId && !line) throw new UserError("That line no longer exists.");
     const c = convertToBase(item, input.quantity, input.unit, this.md.conversions);

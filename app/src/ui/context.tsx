@@ -18,6 +18,8 @@ export interface Ctx {
   nameOf: (id?: string | null) => string;
   toast: (msg: string, bad?: boolean) => void;
   run: <T>(f: () => Promise<T>, ok?: string) => Promise<T | undefined>;
+  /** Like run, but resolves true on success and false on error. */
+  act: (f: () => Promise<unknown>, ok?: string) => Promise<boolean>;
 }
 
 const C = createContext<Ctx | null>(null);
@@ -100,7 +102,7 @@ export function AppProvider({ platform, store, children }: { platform: Platform;
 
   const toast = useCallback((msg: string, bad?: boolean) => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, msg, bad }]);
+    setToasts((t) => [...t, { id, msg, bad }].slice(-4));
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), bad ? 7000 : 3500);
   }, []);
 
@@ -124,10 +126,26 @@ export function AppProvider({ platform, store, children }: { platform: Platform;
     [toast],
   );
 
+  const act = useCallback(
+    async (f: () => Promise<unknown>, ok?: string) => {
+      let failed = false;
+      await run(async () => {
+        try {
+          return await f();
+        } catch (e) {
+          failed = true;
+          throw e;
+        }
+      }, ok);
+      return !failed;
+    },
+    [run],
+  );
+
   const nameOf = useCallback((id?: string | null) => (!id ? "System" : id === userId ? `${names[id] && names[id] !== "Someone" ? names[id] : "You"}` : names[id] || "Someone"), [names, userId]);
 
   const loaded = COLLECTIONS.every((c) => loadedSet.has(c));
-  const ctx: Ctx = { platform, store, state, loaded, loadNote, actor, svc, names, nameOf, toast, run };
+  const ctx: Ctx = { platform, store, state, loaded, loadNote, actor, svc, names, nameOf, toast, run, act };
   return (
     <C.Provider value={ctx}>
       {children}
