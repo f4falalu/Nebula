@@ -82,7 +82,7 @@ def state(actor: Actor = Depends(api_actor)):
             "md": load_master(conn),
             "roles": load_roles(conn),
             "proposals": load_proposals(conn) if actor.role in ("admin", "ra") else {},
-            "users": load_users(conn) if actor.role == "admin" else [],
+            "users": load_users(conn) if actor.role == "admin" else [{"id": u["id"], "name": u.get("name") or (u.get("email") or "").split("@")[0]} for u in load_users(conn)],
         }
 
 

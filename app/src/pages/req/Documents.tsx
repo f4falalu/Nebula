@@ -5,7 +5,7 @@ import { can } from "../../domain/permissions";
 import { fmtDateTime } from "../../domain/time";
 import { STAGE_LABEL } from "../../domain/lifecycle";
 import type { ReqDocument, Requisition } from "../../domain/types";
-import { ACCEPTED_TYPES, assetUrl } from "../../data/files";
+import { ACCEPTED_TYPES } from "../../data/files";
 
 const CATEGORY: Record<ReqDocument["category"], string> = {
   original_requisition: "Original requisition",
@@ -32,30 +32,23 @@ export function DocLink({ r, docId }: { r: Requisition; docId: string }) {
 }
 
 function DocModal({ r, d, onClose }: { r: Requisition; d: ReqDocument; onClose: () => void }) {
-  const { actor, platform, svc, run, toast } = useApp();
+  const { actor, svc, run, caps } = useApp();
   const [page, setPage] = useState(1);
-  const download = async () => {
-    if (!platform.downloads) return toast("Downloads aren't available in this view.", true);
-    await run(async () => {
-      const blob = await (await fetch(assetUrl(d.assetId))).blob();
-      await platform.downloads.save({ filename: d.fileName, data: blob });
-      await svc.logDownload(r.id, d.id);
-    });
-  };
+  const download = () => run(() => svc.downloadDocument(r.id, d));
   return (
     <Modal wide title={d.fileName} onClose={onClose}
       foot={<>
         {d.pageCount > 1 && <><button className="btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous page</button><button className="btn" disabled={page >= d.pageCount} onClick={() => setPage(page + 1)}>Next page</button></>}
-        {can(actor, "documents.download") && <button className="btn primary" onClick={download}>Download</button>}
+        {can(actor, "documents.download") && caps.downloads && <button className="btn primary" onClick={download}>Download</button>}
       </>}>
-      <div className="doc-view" style={{ maxHeight: "65vh" }}><DocView assetId={d.assetId} mime={d.mimeType} page={page} /></div>
+      <div className="doc-view" style={{ maxHeight: "65vh" }}><DocView doc={d} page={page} /></div>
       <span className="muted small">SHA-256 <span className="mono">{d.sha256}</span> · {(d.fileSize / 1024).toFixed(0)} KB · {d.pageCount} page{d.pageCount > 1 ? "s" : ""}</span>
     </Modal>
   );
 }
 
 export function DocumentsTab({ r }: { r: Requisition }) {
-  const { actor, svc, act } = useApp();
+  const { actor, svc, act, caps } = useApp();
   const [view, setView] = useState<ReqDocument | null>(null);
   const [upload, setUpload] = useState(false);
   const docs = Object.values(r.documents).filter((d): d is ReqDocument => !!d).sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt));
@@ -65,7 +58,7 @@ export function DocumentsTab({ r }: { r: Requisition }) {
         <h3>Documents</h3>
         {can(actor, "evidence.upload") && r.recordStatus !== "cancelled" && <button className="btn sm" onClick={() => setUpload(true)}>Upload supporting document</button>}
       </div>
-      <p className="muted small" style={{ padding: "10px 16px 0" }}>Files are stored unchanged and never deleted. Viewing uses short-lived links inside claude.ai{can(actor, "documents.download") ? "; every download is recorded in the audit history" : ""}.</p>
+      <p className="muted small" style={{ padding: "10px 16px 0" }}>Files are stored unchanged and never deleted. Viewing uses short-lived links{caps.mode === "artifact" ? " inside claude.ai" : ""}{can(actor, "documents.download") ? "; every download is recorded in the audit history" : ""}.</p>
       <div className="table-wrap">
         <table className="t">
           <thead><tr><th>File</th><th>Category</th><th>Type</th><th>Stage</th><th>Uploaded</th><th>Checksum</th><th></th></tr></thead>

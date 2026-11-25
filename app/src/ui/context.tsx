@@ -2,9 +2,29 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { Platform } from "../data/platform";
 import { resolveNames } from "../data/platform";
 import type { Doc, Store } from "../data/store";
-import { Services, UserError, type AppState, type Proposal } from "../data/services";
+import { Services } from "../data/services";
+import { UserError, type AppState, type NebulaServices, type Proposal } from "../data/api-types";
+import type { AiStatus, ApiServices, Me } from "../data/api";
 import { resolveActor, type Actor } from "../domain/permissions";
 import { DEFAULT_SETTINGS, type MasterData, type Requisition, type RoleAssignment, type Settings } from "../domain/types";
+
+/** Where the data lives: the claude.ai artifact (V1) or the Nebula server (V2). */
+export type Backend =
+  | { kind: "artifact"; platform: Platform; store: Store }
+  | { kind: "web"; api: ApiServices; me: Me; signOut: () => void; accountLabel?: string };
+
+export interface Caps {
+  /** "artifact" = V1 on claude.ai; "web" = V2 on Nebula's own server. */
+  mode: "artifact" | "web";
+  /** Reading documents with AI is available right now. */
+  aiReading: boolean;
+  /** Name shown for the reading feature ("Claude" in V1, "AI" in V2). */
+  aiName: string;
+  /** Why reading isn't available, when it isn't. */
+  aiUnavailableReason: string;
+  /** Files can be offered for download/export in this view. */
+  downloads: boolean;
+}
 
 export interface Ctx {
   platform: Platform;
@@ -13,7 +33,14 @@ export interface Ctx {
   loaded: boolean;
   loadNote: string | null;
   actor: Actor;
-  svc: Services;
+  svc: NebulaServices;
+  /** V2 only: the API client (AI settings, usage, users, audit paging). */
+  api: ApiServices | null;
+  me: Me | null;
+  caps: Caps;
+  signOut: (() => void) | null;
+  accountLabel: string | null;
+  refreshAi: () => void;
   names: Record<string, string>;
   nameOf: (id?: string | null) => string;
   toast: (msg: string, bad?: boolean) => void;
@@ -36,19 +63,43 @@ function emptyState(): AppState {
   };
 }
 
-export function AppProvider({ platform, store, children }: { platform: Platform; store: Store; children: React.ReactNode }) {
-  const [state, setState] = useState<AppState>(emptyState);
+// In V2 the pages never touch the artifact store; this placeholder only answers `live`.
+const WEB_STORE: Store = {
+  live: true,
+  watch: () => () => undefined,
+  get: async () => undefined,
+  set: async () => { throw new UserError("Not available on this server."); },
+  update: async () => { throw new UserError("Not available on this server."); },
+  remove: async () => { throw new UserError("Not available on this server."); },
+  nextSerial: async () => { throw new UserError("Not available on this server."); },
+};
+
+function webPlatform(me: Me): Platform {
+  return { db: null, user: null, assets: null, sample: null, downloads: null, userId: me.id, ceiling: me.role ?? "supervisor", imageLimits: null };
+}
+
+export function AppProvider({ backend, children }: { backend: Backend; children: React.ReactNode }) {
+  const web = backend.kind === "web" ? backend : null;
+  const art = backend.kind === "artifact" ? backend : null;
+  const platform = useMemo(() => (art ? art.platform : webPlatform(web!.me)), [art, web]);
+  const store = art ? art.store : WEB_STORE;
+
+  const [state, setState] = useState<AppState>(() => (web ? web.api.state : emptyState()));
   const stateRef = useRef(state);
   stateRef.current = state;
   const [loadedSet, setLoaded] = useState<Set<string>>(new Set());
+  const [webLoaded, setWebLoaded] = useState(web ? web.api.loaded : false);
   const [loadNote, setLoadNote] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Array<{ id: number; msg: string; bad?: boolean }>>([]);
   const [names, setNames] = useState<Record<string, string>>({});
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
 
+  // ----- V1: live subscriptions to the artifact database
   useEffect(() => {
+    if (!art) return;
     const timer = setTimeout(() => setLoadNote("The shared data is taking a while to load. What you see may be out of date."), 10000);
     const unsubs = COLLECTIONS.map((c) =>
-      store.watch(
+      art.store.watch(
         c,
         (docs: Record<string, Doc>, fromCache) => {
           if (!fromCache) clearTimeout(timer);
@@ -75,13 +126,47 @@ export function AppProvider({ platform, store, children }: { platform: Platform;
       clearTimeout(timer);
       unsubs.forEach((u) => u());
     };
-  }, [store]);
+  }, [art]);
 
-  const userId = platform.userId ?? "preview-user";
-  const actor = useMemo(() => resolveActor(userId, platform.ceiling, state.roles[userId]), [userId, platform.ceiling, state.roles]);
-  const svc = useMemo(() => new Services(store, platform, actor, () => stateRef.current), [store, platform, actor]);
+  // ----- V2: state cache in the API client, refreshed by polling and after each change
+  useEffect(() => {
+    if (!web) return;
+    const api = web.api;
+    const unsub = api.subscribe(() => {
+      setState(api.state);
+      setWebLoaded(api.loaded);
+      setLoadNote(api.loadError && api.loaded ? `Couldn't refresh: ${api.loadError}` : api.loadError);
+    });
+    const stop = api.startPolling();
+    return () => {
+      unsub();
+      stop();
+    };
+  }, [web]);
 
-  // Resolve display names for every user id the state mentions.
+  const refreshAi = useCallback(() => {
+    if (!web) return;
+    web.api.aiStatus().then(setAiStatus).catch(() => setAiStatus({ enabled: false, readyForReading: false, reason: "AI reading status couldn't be checked." }));
+  }, [web]);
+  useEffect(() => {
+    refreshAi();
+  }, [refreshAi]);
+
+  const userId = web ? web.me.id : platform.userId ?? "preview-user";
+  const actor: Actor = useMemo(() => {
+    if (web) {
+      const role = web.me.role ?? "supervisor";
+      return { id: web.me.id, role, grants: role === "supervisor" ? web.me.grants : [], canWrite: true, ceiling: role };
+    }
+    return resolveActor(userId, platform.ceiling, state.roles[userId]);
+  }, [web, userId, platform.ceiling, state.roles]);
+
+  const svc: NebulaServices = useMemo(
+    () => (web ? web.api : new Services(store, platform, actor, () => stateRef.current)),
+    [web, store, platform, actor],
+  );
+
+  // Display names for every user id the state mentions.
   const ids = useMemo(() => {
     const s = new Set<string>([userId, ...Object.keys(state.roles)]);
     for (const r of Object.values(state.reqs)) {
@@ -93,12 +178,19 @@ export function AppProvider({ platform, store, children }: { platform: Platform;
     return [...s].sort().join("|");
   }, [state.reqs, state.roles, userId]);
   useEffect(() => {
+    if (web) {
+      const n: Record<string, string> = {};
+      for (const u of state.users ?? []) n[u.id] = u.name || u.email || "Someone";
+      n[web.me.id] = web.me.name || web.me.email || "You";
+      setNames(n);
+      return;
+    }
     let alive = true;
     resolveNames(platform.user, ids.split("|")).then((n) => alive && setNames((p) => ({ ...p, ...n })));
     return () => {
       alive = false;
     };
-  }, [ids, platform.user]);
+  }, [ids, platform.user, web, state.users]);
 
   const toast = useCallback((msg: string, bad?: boolean) => {
     const id = Date.now() + Math.random();
@@ -142,10 +234,36 @@ export function AppProvider({ platform, store, children }: { platform: Platform;
     [run],
   );
 
-  const nameOf = useCallback((id?: string | null) => (!id ? "System" : id === userId ? `${names[id] && names[id] !== "Someone" ? names[id] : "You"}` : names[id] || "Someone"), [names, userId]);
+  const nameOf = useCallback(
+    (id?: string | null) => (!id ? "System" : id === userId ? `${names[id] && names[id] !== "Someone" ? names[id] : "You"}` : names[id] || "Someone"),
+    [names, userId],
+  );
 
-  const loaded = COLLECTIONS.every((c) => loadedSet.has(c));
-  const ctx: Ctx = { platform, store, state, loaded, loadNote, actor, svc, names, nameOf, toast, run, act };
+  const caps: Caps = useMemo(() => {
+    if (web) {
+      return {
+        mode: "web",
+        aiReading: !!aiStatus?.readyForReading,
+        aiName: "AI",
+        aiUnavailableReason: aiStatus?.reason || (aiStatus ? "Reading with AI is switched off. An Administrator can turn it on in Administration." : "Checking whether AI reading is available…"),
+        downloads: true,
+      };
+    }
+    return {
+      mode: "artifact",
+      aiReading: !!(platform.sample && platform.imageLimits),
+      aiName: "Claude",
+      aiUnavailableReason: store.live ? "Reading with Claude isn't available in this view." : "Preview mode can't use Claude.",
+      downloads: !!platform.downloads,
+    };
+  }, [web, aiStatus, platform, store.live]);
+
+  const loaded = web ? webLoaded : COLLECTIONS.every((c) => loadedSet.has(c));
+  const ctx: Ctx = {
+    platform, store, state, loaded, loadNote, actor, svc, api: web ? web.api : null, me: web ? web.me : null, caps,
+    signOut: web ? web.signOut : null, accountLabel: web ? web.accountLabel ?? null : null, refreshAi,
+    names, nameOf, toast, run, act,
+  };
   return (
     <C.Provider value={ctx}>
       {children}

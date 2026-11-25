@@ -25,7 +25,7 @@ export function RequisitionPage({ id }: { id: string }) {
 }
 
 function RequisitionView({ r }: { r: Requisition }) {
-  const { state, actor, svc, run, act } = useApp();
+  const { state, actor, svc, run, act, caps } = useApp();
   const md = state.md;
   const [tab, setTab] = useState<TabKey>(() => (r.recordStatus === "finalized" || r.recordStatus === "cancelled" ? "fulfillment" : "review"));
   const [modal, setModal] = useState<null | "cancel" | "reopen" | "close" | "reopen-f" | "edit-request">(null);
@@ -76,7 +76,7 @@ function RequisitionView({ r }: { r: Requisition }) {
         <div className="row">{actions}</div>
       </div>
 
-      {r.recordStatus === "processing" && <div className="banner">Claude is reading the document. Suggested lines appear here when it finishes; you can leave this page.</div>}
+      {r.recordStatus === "processing" && <div className="banner">{caps.aiName} is reading the document. Suggested lines appear here when it finishes; you can leave this page.</div>}
       {r.recordStatus === "reopened" && <div className="banner warn">Reopened by <Who id={r.reopenedBy} /> on {fmtDateTime(r.reopenedAt)}: {r.reopenReason}. This requisition is excluded from reporting until it is validated and finalized again.</div>}
       {r.recordStatus === "cancelled" && <div className="banner bad">Cancelled by <Who id={r.cancelledBy} /> on {fmtDateTime(r.cancelledAt)}: {r.cancellationReason}</div>}
       {myEdit && (

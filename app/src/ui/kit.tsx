@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "./context";
 import { RECORD_STATUS_LABEL, FULFILLMENT_STATUS_LABEL } from "../domain/records";
 import { STAGE_LABEL } from "../domain/lifecycle";
-import type { FulfillmentStatus, LifecycleStage, RecordStatus } from "../domain/types";
-import { assetUrl, pdfToImages } from "../data/files";
+import type { FulfillmentStatus, LifecycleStage, RecordStatus, ReqDocument } from "../domain/types";
+import { pdfToImages } from "../data/files";
 import { fmtPct } from "../domain/text";
 
 export function Pill({ tone, children, title }: { tone?: "good" | "warn" | "bad" | "info" | "accent"; children: React.ReactNode; title?: string }) {
@@ -179,34 +179,42 @@ export function useOptions() {
 }
 
 /** Shows a stored document: images inline, PDFs rendered page by page. */
-export function DocView({ assetId, mime, page = 1 }: { assetId: string; mime: string; page?: number }) {
+export function DocView({ doc, page = 1 }: { doc: ReqDocument; page?: number }) {
+  const { svc, caps } = useApp();
   const [pages, setPages] = useState<string[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
     setPages(null);
     setErr(null);
-    if (mime !== "application/pdf") {
-      setPages([assetUrl(assetId)]);
-      return;
-    }
     (async () => {
       try {
-        const blob = await (await fetch(assetUrl(assetId))).blob();
+        const url = await svc.documentUrl(doc);
+        if (doc.mimeType !== "application/pdf") {
+          if (alive) setPages([url]);
+          return;
+        }
+        const blob = await (await fetch(url)).blob();
         const imgs = await pdfToImages(blob, 30);
         if (alive) setPages(imgs.map((b) => URL.createObjectURL(b)));
       } catch {
-        if (alive) setErr("This PDF couldn't be shown here.");
+        if (alive) setErr(doc.mimeType === "application/pdf" ? "This PDF couldn't be shown here." : "The file couldn't be loaded.");
       }
     })();
     return () => {
       alive = false;
     };
-  }, [assetId, mime]);
+  }, [doc.id, doc.mimeType, svc]); // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <div className="empty">{err}</div>;
   if (!pages) return <div className="empty">Loading document…</div>;
   const src = pages[Math.min(page, pages.length) - 1] ?? pages[0];
-  return <img src={src} alt="Requisition document page" onError={() => setErr("The file couldn't be loaded. It may be visible only to members of the owner's organization.")} />;
+  return (
+    <img
+      src={src}
+      alt="Requisition document page"
+      onError={() => setErr(caps.mode === "artifact" ? "The file couldn't be loaded. It may be visible only to members of the owner's organization." : "The file couldn't be loaded. Its link may have expired; reopen it.")}
+    />
+  );
 }
 
 export function Who({ id }: { id?: string | null }) {

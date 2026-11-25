@@ -23,7 +23,7 @@ interface Row {
 }
 
 export function RequisitionsPage() {
-  const { state, actor, platform } = useApp();
+  const { state, actor, svc, caps } = useApp();
   const { fac, progs } = useOptions();
   const [showNew, setShowNew] = useState(false);
   const [q, setQ] = useState("");
@@ -90,7 +90,7 @@ export function RequisitionsPage() {
       [r.number, facility, programme, r.requisitionDate ?? "", r.requisitionDateEstimated ? "yes" : "", r.receivedAt, r.entryAt, RECORD_STATUS_LABEL[r.recordStatus], STAGE_LABEL[st], FULFILLMENT_STATUS_LABEL[r.fulfillmentStatus], requested, issued, ofr?.toFixed(1) ?? "", coverage?.toFixed(0) ?? "", inOfficialScope(r) ? "yes" : "no"].map(esc).join(","),
     );
     try {
-      await platform.downloads?.save({ filename: `requisitions-${lagosDate(nowISO())}.csv`, data: [head.map(esc).join(","), ...lines].join("\n") });
+      await svc.saveFile(`requisitions-${lagosDate(nowISO())}.csv`, [head.map(esc).join(","), ...lines].join("\n"));
     } catch {
       /* declined or unavailable */
     }
@@ -106,7 +106,7 @@ export function RequisitionsPage() {
           <p className="sub">{fmtNum(filtered.length)} of {fmtNum(rows.length)} requisitions. OFR here is Issued OFR on credited base quantities; it is provisional until the requisition is finalized and fulfillment is closed.</p>
         </div>
         <div className="row">
-          {platform.downloads && filtered.length > 0 && <button className="btn" onClick={exportCsv}>Export CSV</button>}
+          {caps.downloads && filtered.length > 0 && <button className="btn" onClick={exportCsv}>Export CSV</button>}
           {can(actor, "requisition.create") && <button className="btn primary" onClick={() => setShowNew(true)}><Icon d={ICON.plus} /> New requisition</button>}
         </div>
       </div>
@@ -189,11 +189,11 @@ export function RequisitionsPage() {
 }
 
 function NewRequisitionModal({ onClose }: { onClose: () => void }) {
-  const { svc, run, platform, store } = useApp();
+  const { svc, run, caps } = useApp();
   const [receivedAt, setReceivedAt] = useState(() => toLagosLocal(nowISO()));
   const [via, setVia] = useState("WhatsApp");
   const [files, setFiles] = useState<File[]>([]);
-  const canRead = !!(platform.sample && platform.imageLimits);
+  const canRead = caps.aiReading;
   const [read, setRead] = useState(canRead);
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
@@ -260,9 +260,9 @@ function NewRequisitionModal({ onClose }: { onClose: () => void }) {
       )}
       <label className="check">
         <input id="new-read" type="checkbox" checked={read && canRead} disabled={!canRead} onChange={(e) => setRead(e.target.checked)} />
-        Read the document with Claude and suggest the lines
+        Read the document with {caps.aiName} and suggest the lines
       </label>
-      {!canRead && <p className="muted small">{store.live ? "Reading with Claude isn't available in this view. You'll enter the lines by hand." : "Preview mode can't use Claude. You'll enter the lines by hand."}</p>}
+      {!canRead && <p className="muted small">{caps.aiUnavailableReason} You'll enter the lines by hand.</p>}
     </Modal>
   );
 }

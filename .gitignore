@@ -6,3 +6,4 @@ backend/.venv/
 __pycache__/
 .pytest_cache/
 app/dist/web/
+app/e2e/out-web/

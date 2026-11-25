@@ -93,7 +93,7 @@ export function App() {
           <div className="brand-mark">Nb</div>
           <div>
             <b>Nebula</b>
-            <span>Requisition audit · V1</span>
+            <span>Requisition audit · {ctx.caps.mode === "web" ? "V2" : "V1"}</span>
           </div>
         </div>
         <nav className="nav">
@@ -112,6 +112,12 @@ export function App() {
             {actor.grants.length ? ` + ${actor.grants.length} grant${actor.grants.length > 1 ? "s" : ""}` : ""}
           </div>
           {!store.live && <div className="pill warn plain">Preview: not shared</div>}
+          {ctx.signOut && (
+            <div className="row">
+              {ctx.accountLabel && <span className="small" style={{ overflowWrap: "anywhere" }}>{ctx.accountLabel}</span>}
+              <button className="btn sm" onClick={ctx.signOut}>Sign out</button>
+            </div>
+          )}
         </div>
       </aside>
       {navOpen && <div className="scrim" style={{ zIndex: 25, background: "rgba(0,0,0,.25)" }} onClick={() => setNavOpen(false)} />}

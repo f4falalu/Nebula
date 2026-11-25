@@ -6,9 +6,13 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:web": "node build.mjs --web",
+    "e2e": "node e2e/smoke.mjs e2e/out",
+    "e2e:web": "node e2e/smoke-web.mjs e2e/out-web"
   },
   "devDependencies": {
+    "@clerk/clerk-js": "6.42.3",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "esbuild": "^0.24.2",

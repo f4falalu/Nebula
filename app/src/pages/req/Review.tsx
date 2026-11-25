@@ -13,7 +13,7 @@ const METHOD_LABEL: Record<MatchCandidate["method"] | "human", string> = {
 };
 
 export function ReviewTab({ r }: { r: Requisition }) {
-  const { state, actor, svc, run } = useApp();
+  const { state, actor, svc, run, caps } = useApp();
   const md = state.md;
   const originals = useMemo(
     () => Object.values(r.documents).filter((d): d is ReqDocument => !!d && d.category === "original_requisition").sort((a, b) => a.firstPage - b.firstPage),
@@ -38,7 +38,7 @@ export function ReviewTab({ r }: { r: Requisition }) {
           </div>
         </div>
         <div className="doc-view">
-          {docForPage ? <DocView assetId={docForPage.assetId} mime={docForPage.mimeType} page={page - docForPage.firstPage + 1} /> : <div className="empty">No original document.</div>}
+          {docForPage ? <DocView doc={docForPage} page={page - docForPage.firstPage + 1} /> : <div className="empty">No original document.</div>}
         </div>
         {docForPage && <span className="muted small">{docForPage.fileName} · SHA-256 <span className="mono">{docForPage.sha256.slice(0, 12)}…</span></span>}
       </div>
@@ -47,16 +47,16 @@ export function ReviewTab({ r }: { r: Requisition }) {
         {r.extraction?.status === "failed" && (
           <div className="banner bad">
             Reading the document failed: {r.extraction.error}
-            {can(actor, "extraction.retry") && editable && <> <button className="btn sm" onClick={() => run(() => svc.runExtraction(r.id))}>Retry reading</button></>}
+            {can(actor, "extraction.retry") && editable && caps.aiReading && <> <button className="btn sm" onClick={() => run(() => svc.runExtraction(r.id), "Reading started")}>Retry reading</button></>}
           </div>
         )}
         {r.extraction?.status === "completed" && editable && (
-          <div className="note-box">Claude suggested {lines.filter((l) => l.rawExtractedText).length} lines on {fmtDateTime(r.extraction.completedAt)}. These are suggestions: confirm each item, quantity and unit against the document. The raw output is kept in the audit history.</div>
+          <div className="note-box">{caps.aiName} suggested {lines.filter((l) => l.rawExtractedText).length} lines on {fmtDateTime(r.extraction.completedAt)}. These are suggestions: confirm each item, quantity and unit against the document. The raw output is kept with the requisition.</div>
         )}
         {(r.extraction?.status === "skipped" || !r.extraction) && editable && lines.length === 0 && (
           <div className="note-box">
             Enter the lines from the document by hand.
-            {can(actor, "extraction.retry") && <> Or <button className="btn sm" onClick={() => run(() => svc.runExtraction(r.id))}>read it with Claude</button></>}
+            {can(actor, "extraction.retry") && caps.aiReading && <> Or <button className="btn sm" onClick={() => run(() => svc.runExtraction(r.id), "Reading started")}>read it with {caps.aiName}</button></>}
           </div>
         )}
         {!editable && r.recordStatus === "finalized" && <div className="note-box">Finalized: details and lines are locked. Use Request edit for a specific change.</div>}

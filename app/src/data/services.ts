@@ -25,23 +25,14 @@ import {
   finalizationIssues, isEditable, statusAfterEdit, validationIssues,
 } from "../domain/records";
 
-export class UserError extends Error {}
-
-export interface AppState {
-  reqs: Record<string, Requisition>;
-  md: MasterData;
-  roles: Record<string, RoleAssignment>;
-  proposals: Record<string, Proposal>;
-}
-
-export type Proposal =
-  | ({ kind: "alias" } & Alias)
-  | ({ kind: "conversion" } & UnitConversion)
-  | ({ kind: "equivalence" } & SubstitutionEquivalence);
+import { UserError, type AppState, type NebulaServices, type Proposal } from "./api-types";
+import { assetUrl } from "./files";
+export { UserError };
+export type { AppState, Proposal };
 
 type Patch = Record<string, any>;
 
-export class Services {
+export class Services implements NebulaServices {
   constructor(
     private store: Store,
     private platform: Platform,
@@ -606,6 +597,29 @@ export class Services {
     await this.markEditUsed(id, er);
   }
 
+  // ---------- interface methods specific to the artifact ----------
+  async documentUrl(doc: ReqDocument): Promise<string> {
+    return assetUrl(doc.assetId);
+  }
+
+  async downloadDocument(requisitionId: string, doc: ReqDocument) {
+    this.need("documents.download");
+    if (!this.platform.downloads) throw new UserError("Downloads aren't available in this view.");
+    const blob = await (await fetch(assetUrl(doc.assetId))).blob();
+    await this.platform.downloads.save({ filename: doc.fileName, data: blob });
+    await this.logDownload(requisitionId, doc.id);
+  }
+
+  async saveFile(filename: string, data: string) {
+    if (!this.platform.downloads) throw new UserError("Downloads aren't available in this view.");
+    await this.platform.downloads.save({ filename, data });
+  }
+
+  async requisitionAudit(id: string): Promise<AuditEvent[]> {
+    const d = await this.store.get(`audit/${id}`);
+    return Object.values((d?.entries as Record<string, AuditEvent>) ?? {}).sort((a, b) => b.at.localeCompare(a.at));
+  }
+
   // ---------- aliases ----------
   private async noteAlias(entityType: "facility" | "item", entityId: string, text: string) {
     const n = normalize(text);
@@ -651,13 +665,13 @@ export class Services {
   }
 
   // ---------- conversions & equivalences ----------
-  async proposeConversion(c: { itemId: string | null; fromUnit: string; factor: number; incompatible?: boolean; notes?: string }) {
+  async proposeConversion(c: { itemId: string | null; fromUnit: string; factor: number; incompatible?: boolean; notes?: string; toUnit?: string }) {
     this.need("conversion.propose");
     const item = c.itemId ? this.md.items[c.itemId] : undefined;
     const from = normalizeUnit(c.fromUnit);
     if (!from) throw new UserError("Enter the unit to convert from.");
     if (!c.incompatible && !(c.factor > 0)) throw new UserError("Enter a factor above 0.");
-    const toUnit = item ? normalizeUnit(item.baseUnit) : "";
+    const toUnit = item ? normalizeUnit(item.baseUnit) : normalizeUnit(c.toUnit);
     if (c.itemId && !item) throw new UserError("Unknown item.");
     const doc: UnitConversion = {
       id: newId(), itemId: c.itemId, fromUnit: from, toUnit, factor: c.incompatible ? 0 : c.factor, incompatible: c.incompatible || undefined,

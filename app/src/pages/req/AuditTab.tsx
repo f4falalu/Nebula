@@ -5,23 +5,21 @@ import { fmtDateTime } from "../../domain/time";
 import type { AuditEvent, Requisition } from "../../domain/types";
 
 export function AuditTab({ r }: { r: Requisition }) {
-  const { store } = useApp();
+  const { svc } = useApp();
   const [events, setEvents] = useState<AuditEvent[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    store
-      .get(`audit/${r.id}`)
-      .then((d) => {
-        if (!alive) return;
-        const list = Object.values((d?.entries as Record<string, AuditEvent>) ?? {}).sort((a, b) => b.at.localeCompare(a.at));
-        setEvents(list);
+    svc
+      .requisitionAudit(r.id)
+      .then((list) => {
+        if (alive) setEvents(list);
       })
       .catch(() => alive && setErr("The audit history couldn't be loaded."));
     return () => {
       alive = false;
     };
-  }, [store, r.id, r.updatedAt]);
+  }, [svc, r.id, r.updatedAt]);
   if (err) return <div className="banner bad">{err}</div>;
   if (!events) return <div className="boot">Loading audit history…</div>;
   return (

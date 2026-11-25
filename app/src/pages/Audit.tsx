@@ -20,7 +20,9 @@ function Json({ value }: { value: unknown }) {
 }
 
 export function AuditPage(_p: { id?: string }) {
-  const { store, actor, state, nameOf } = useApp();
+  const { store, actor, state, nameOf, api } = useApp();
+  const [next, setNext] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [events, setEvents] = useState<AuditEvent[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -35,6 +37,21 @@ export function AuditPage(_p: { id?: string }) {
 
   useEffect(() => {
     if (!allowed) return;
+    if (api) {
+      // V2: the server pages the audit log, newest first.
+      let alive = true;
+      api.auditLog({ limit: 500 })
+        .then((res) => {
+          if (!alive) return;
+          setEvents(res.events);
+          setNext(res.next);
+          setErr(null);
+        })
+        .catch((e) => alive && setErr(e instanceof Error ? e.message : "The audit log couldn't be loaded."));
+      return () => {
+        alive = false;
+      };
+    }
     const timer = setTimeout(() => setErr("The audit log is taking a while to load."), 10000);
     const unsub = store.watch(
       "audit",
@@ -58,7 +75,21 @@ export function AuditPage(_p: { id?: string }) {
       clearTimeout(timer);
       unsub();
     };
-  }, [store, allowed]);
+  }, [store, allowed, api]);
+
+  const loadOlder = async () => {
+    if (!api || !next) return;
+    setLoadingMore(true);
+    try {
+      const res = await api.auditLog({ limit: 500, before: next });
+      setEvents((cur) => [...(cur ?? []), ...res.events]);
+      setNext(res.next);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Older events couldn't be loaded.");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const numberOf = (id?: string) => (id ? state.reqs[id]?.number : undefined);
 
@@ -98,7 +129,7 @@ export function AuditPage(_p: { id?: string }) {
         </div>
       </div>
       <div className="note-box small">
-        V1 keeps audit records append-only in the app: Nebula only ever adds entries. V2 moves to PostgreSQL, where the database itself rejects any change or deletion of audit records.
+        {api ? "Audit records are append-only: the database itself rejects any change or deletion." : "V1 keeps audit records append-only in the app: Nebula only ever adds entries. V2 moves to PostgreSQL, where the database itself rejects any change or deletion of audit records."}
       </div>
       <div className="card filters">
         <Field label="Search"><input id="audit-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Reason, entity, value" /></Field>
@@ -164,8 +195,11 @@ export function AuditPage(_p: { id?: string }) {
               </tbody>
             </table>
           </div>
-          {filtered.length > limit && (
-            <div className="card-body"><button className="btn" onClick={() => setLimit(limit + PAGE)}>Show {Math.min(PAGE, filtered.length - limit)} more</button></div>
+          {(filtered.length > limit || next) && (
+            <div className="card-body row">
+              {filtered.length > limit && <button className="btn" onClick={() => setLimit(limit + PAGE)}>Show {Math.min(PAGE, filtered.length - limit)} more</button>}
+              {filtered.length <= limit && next && <button className="btn" disabled={loadingMore} onClick={loadOlder}>{loadingMore ? "Loading…" : "Load older events"}</button>}
+            </div>
           )}
         </div>
       )}

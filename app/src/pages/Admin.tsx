@@ -7,6 +7,7 @@ import { fmtDateTime } from "../domain/time";
 import { normalizeUnit } from "../domain/units";
 import { itemLabel } from "../domain/matching";
 import { STARTER } from "../data/starter";
+import { AiTab, UsageTab, WebUsersTab } from "./AdminV2";
 import type { Proposal } from "../data/services";
 import {
   FULFILLMENT_STAGES,
@@ -14,10 +15,11 @@ import {
   type Settings, type SubstitutionEquivalence, type TimeBasis, type UnitConversion,
 } from "../domain/types";
 
-type Tab = "setup" | "facilities" | "items" | "programmes" | "conversions" | "equivalences" | "aliases" | "users" | "settings";
+type Tab = "setup" | "facilities" | "items" | "programmes" | "conversions" | "equivalences" | "aliases" | "users" | "settings" | "ai" | "usage";
 
 export function AdminPage(_p: { id?: string }) {
-  const { actor } = useApp();
+  const { actor, caps } = useApp();
+  const web = caps.mode === "web";
   const [tab, setTab] = useState<Tab>(() => {
     try {
       return (sessionStorage.getItem("nebula-admin-tab") as Tab) || "setup";
@@ -34,7 +36,7 @@ export function AdminPage(_p: { id?: string }) {
     }
   };
   if (actor.role !== "admin") {
-    return <Empty title="Administrators only">Ask the artifact owner for Editor access if you need to manage master data, users or settings.</Empty>;
+    return <Empty title="Administrators only">{web ? "Ask an Administrator if you need to manage master data, users or settings." : "Ask the artifact owner for Editor access if you need to manage master data, users or settings."}</Empty>;
   }
   return (
     <>
@@ -56,6 +58,7 @@ export function AdminPage(_p: { id?: string }) {
           ["equivalences", "Substitutions"],
           ["aliases", "Alias candidates"],
           ["users", "Users & roles"],
+          ...(web ? ([["ai", "Document reading (AI)"], ["usage", "Usage & credits"]] as Array<[Tab, string]>) : []),
           ["settings", "Settings"],
         ]}
       />
@@ -66,7 +69,9 @@ export function AdminPage(_p: { id?: string }) {
       {tab === "conversions" && <ConversionsTab />}
       {tab === "equivalences" && <EquivalencesTab />}
       {tab === "aliases" && <AliasCandidatesTab />}
-      {tab === "users" && <UsersTab />}
+      {tab === "users" && (web ? <WebUsersTab /> : <UsersTab />)}
+      {tab === "ai" && web && <AiTab />}
+      {tab === "usage" && web && <UsageTab />}
       {tab === "settings" && <SettingsTab />}
     </>
   );
@@ -112,7 +117,7 @@ function StatusPill({ s }: { s: string }) {
 
 // ---------------- Setup ----------------
 function SetupTab({ go }: { go: (t: Tab) => void }) {
-  const { state, svc, run, actor } = useApp();
+  const { state, svc, run, actor, caps } = useApp();
   const [busy, setBusy] = useState(false);
   const md = state.md;
   const counts = {
@@ -157,6 +162,14 @@ function SetupTab({ go }: { go: (t: Tab) => void }) {
             <button className="btn" onClick={() => go("items")}>Import your items (CSV)</button>
           </div>
         </div>
+        {caps.mode === "web" ? (
+          <div className="card stack">
+            <h2>How people get access</h2>
+            <p>People sign in with their own account. Their first sign-in creates a pending account that can't see any data.</p>
+            <p>Activate them and choose a role under Users &amp; roles: Requisition Assistant, Supervisor (view-only, with optional extra permissions) or Administrator.</p>
+            <p className="muted small">Addresses listed in the server's ADMIN_EMAILS setting become Administrators automatically on first sign-in.</p>
+          </div>
+        ) : (
         <div className="card stack">
           <h2>How roles work in V1</h2>
           <p>Roles come from how the artifact is shared on claude.ai. Use the Share menu to set each person's level.</p>
@@ -170,6 +183,7 @@ function SetupTab({ go }: { go: (t: Tab) => void }) {
             A Supervisor who needs to reopen requisitions or approve edit requests must be shared as a Contributor, because those actions write data.
           </p>
         </div>
+        )}
       </div>
     </div>
   );
@@ -563,7 +577,7 @@ function ConversionsTab() {
   const { items: itemOpts } = useOptions();
   const md = state.md;
   const [showRetired, setShowRetired] = useState(false);
-  const [v, setV] = useState({ itemId: "", fromUnit: "", factor: "", incompatible: false, notes: "" });
+  const [v, setV] = useState({ itemId: "", fromUnit: "", factor: "", incompatible: false, notes: "", toUnit: "" });
   const [resolved, setResolved] = useState<number | null>(null);
   const list = Object.values(md.conversions)
     .filter((c) => showRetired || c.status === "approved")
@@ -588,6 +602,7 @@ function ConversionsTab() {
             <Picker id="conv-item" options={itemOpts} value={v.itemId} onChange={(id) => setV({ ...v, itemId: id })} allowEmpty placeholder="All items" />
           </Field>
           <div className="form-grid">
+            {!v.itemId && <Field label="Base unit it converts to" hint="Applies to items with this base unit."><input id="conv-to" value={v.toUnit} onChange={(e) => setV({ ...v, toUnit: e.target.value })} placeholder="tablet" /></Field>}
             <Field label="From unit"><input id="conv-from" value={v.fromUnit} onChange={(e) => setV({ ...v, fromUnit: e.target.value })} placeholder="carton" /></Field>
             <Field label={`Factor (base units per ${normalizeUnit(v.fromUnit) || "unit"})`}>
               <input id="conv-factor" type="number" min="0" step="any" disabled={v.incompatible} value={v.factor} onChange={(e) => setV({ ...v, factor: e.target.value })} placeholder="100" />
@@ -601,10 +616,10 @@ function ConversionsTab() {
           <div className="row end">
             <button
               className="btn primary"
-              disabled={!v.fromUnit.trim() || (!v.incompatible && !(Number(v.factor) > 0))}
+              disabled={!v.fromUnit.trim() || (!v.itemId && !v.toUnit.trim()) || (!v.incompatible && !(Number(v.factor) > 0))}
               onClick={async () => {
-                const ok = await act(() => svc.proposeConversion({ itemId: v.itemId || null, fromUnit: v.fromUnit, factor: Number(v.factor), incompatible: v.incompatible, notes: v.notes || undefined }), "Conversion approved.");
-                if (ok) setV({ itemId: v.itemId, fromUnit: "", factor: "", incompatible: false, notes: "" });
+                const ok = await act(() => svc.proposeConversion({ itemId: v.itemId || null, fromUnit: v.fromUnit, factor: Number(v.factor), incompatible: v.incompatible, notes: v.notes || undefined, toUnit: v.itemId ? undefined : v.toUnit }), "Conversion approved.");
+                if (ok) setV({ itemId: v.itemId, fromUnit: "", factor: "", incompatible: false, notes: "", toUnit: v.toUnit });
               }}
             >Approve conversion</button>
           </div>

@@ -10,7 +10,7 @@ async function boot() {
   const store = platform.db ? dbStore(platform.db, platform.userId ?? "anon") : memoryStore();
   const root = createRoot(document.getElementById("root")!);
   root.render(
-    <AppProvider platform={platform} store={store}>
+    <AppProvider backend={{ kind: "artifact", platform, store }}>
       <App />
     </AppProvider>,
   );
