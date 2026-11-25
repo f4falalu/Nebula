@@ -17,10 +17,11 @@ from fastapi.testclient import TestClient
 
 
 def _reset_db():
+    name = TEST_DB.rsplit("/", 1)[1]
     with psycopg.connect(TEST_DB.rsplit("/", 1)[0] + "/postgres", autocommit=True) as c:
-        c.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='nebula_test' AND pid<>pg_backend_pid()")
-        c.execute("DROP DATABASE IF EXISTS nebula_test")
-        c.execute("CREATE DATABASE nebula_test")
+        c.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=%s AND pid<>pg_backend_pid()", (name,))
+        c.execute(f'DROP DATABASE IF EXISTS "{name}"')
+        c.execute(f'CREATE DATABASE "{name}"')
 
 
 @pytest.fixture(scope="session")
