@@ -1,0 +1,49 @@
+# Render Blueprint for Nebula V2: one web service (API + worker + web app)
+# with a persistent disk for documents, and a managed PostgreSQL database.
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repository.
+services:
+  - type: web
+    name: nebula
+    runtime: python
+    plan: starter            # disks need a paid instance type
+    region: frankfurt        # closest Render region to Nigeria
+    branch: main
+    autoDeploy: true
+    buildCommand: pip install -r backend/requirements.txt && cd app && npm ci && npm run build:web
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips "*"
+    healthCheckPath: /api/health
+    disk:
+      name: nebula-documents
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: NODE_VERSION
+        value: "22.12.0"
+      - key: NEBULA_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nebula-db
+          property: connectionString
+      - key: STORAGE_DIR
+        value: /var/data/nebula
+      - key: NEBULA_SECRET_KEY        # encrypts the OpenRouter key and signs document links
+        generateValue: true
+      - key: CLERK_PUBLISHABLE_KEY    # from the Clerk dashboard (pk_live_... or pk_test_...)
+        sync: false
+      - key: CLERK_SECRET_KEY         # from the Clerk dashboard (sk_live_... or sk_test_...)
+        sync: false
+      - key: ADMIN_EMAILS             # comma-separated; these people become Administrators on first sign-in
+        sync: false
+      - key: PUBLIC_URL               # e.g. https://nebula.onrender.com (sent to OpenRouter as the referrer)
+        sync: false
+
+databases:
+  - name: nebula-db
+    databaseName: nebula
+    user: nebula
+    plan: basic-256mb        # paid plan: free Render databases expire
+    region: frankfurt
+    postgresMajorVersion: "16"

@@ -1,7 +1,7 @@
 # REQUISITION LIFECYCLE & FULFILLMENT AUDIT PLATFORM
 ## Product Requirements Document (PRD)
 
-**Version:** 2.0
+**Version:** 2.1
 **Date:** 18 November 2026
 **Status:** Implementation-ready draft
 
@@ -1620,33 +1620,48 @@ The following MUST be enforced in PostgreSQL (constraints, triggers, privileges)
 
 # 32. Infrastructure
 
-## 32.1 Architecture
+## 32.1 Architecture (V2, current)
 
-- **Frontend:** React + TypeScript PWA, hosted on Cloudflare Pages
-- **API:** Python FastAPI
-- **Server:** Oracle VM running FastAPI, background worker and PostgreSQL
-- **Object storage:** Cloudflare R2 for original documents, evidence and backups
+V2 runs on Render as one service plus a managed database, so it can be shared quickly and moved later.
+
+- **Web service (Render, Python):** one FastAPI process that serves the API under `/api`, signed document links under `/files`, and the built React + TypeScript app for every other path. A background thread in the same process runs document-reading jobs.
+- **Database:** Render PostgreSQL (paid plan; free databases expire).
+- **Documents:** a Render persistent disk mounted on the web service.
+- **Sign-in:** Clerk. Roles, grants and account activation stay in Nebula's database.
+- **Document reading:** OpenRouter, called only by the server. The API key is stored encrypted and configured by an Administrator (Section 32.6).
+
+The deployment is described in `render.yaml` at the repository root.
 
 ## 32.2 Containerization
 
-The application is containerized with Docker for portability. Services: Frontend (build), API, Worker, PostgreSQL.
+Not used in V2: Render builds and runs the app from the repository. A Dockerfile is added when Nebula moves to the Oracle VM or another host.
 
 ## 32.3 PostgreSQL
 
-PostgreSQL is the primary database. It stores requisitions, master data, lifecycle events, fulfillment records, edit requests, audit events, users/roles/grants, settings and processing jobs.
+PostgreSQL is the primary database. It stores requisitions, master data, lifecycle events, fulfillment records, edit requests, audit events, users/roles/grants, settings, processing jobs and the AI usage ledger.
 
-The application connects with a least-privilege role that has no UPDATE/DELETE on append-only tables (Section 31.8).
+The rules in Section 31.8 are enforced by constraints and triggers. A least-privilege database role without UPDATE/DELETE on append-only tables is added when the host allows separate roles (Render's managed database provides one owner role; the triggers apply to it).
 
-## 32.4 Object Storage
+## 32.4 Document Storage
 
-Documents are stored in Cloudflare R2, never inside PostgreSQL. The database stores metadata and the object-storage key. Storage keys are not guessable, and buckets are private.
+Documents are stored on the web service's persistent disk, never inside PostgreSQL. The database stores metadata and the storage key. Files are written once and never overwritten. They are served only through short-lived signed links. Moving to Cloudflare R2 later only changes the storage module.
+
+A persistent disk ties the service to a single instance; that suits the pilot. Scaling out requires moving documents to object storage first.
 
 ## 32.5 Backup
 
-- Nightly PostgreSQL backup to Cloudflare R2.
-- Weekly restore test.
-- A written restoration procedure is maintained.
-- Backups are protected from modification and deletion by the application's credentials.
+- Render takes daily PostgreSQL backups on paid database plans; check the retention of the chosen plan.
+- The documents disk is snapshotted by Render; check the retention of the chosen plan.
+- A weekly restore test into a separate database, and a written restoration procedure, remain required.
+- Requisitions can also be exported as CSV from the Requisitions page.
+
+## 32.6 Document Reading, Rate Limits and Credits
+
+- **Provider:** OpenRouter, so the model can be changed without code changes. Administrators set the model, a fallback model and the API key in Administration → Document reading (AI). The key is encrypted at rest and never shown again.
+- **API rate limit:** each signed-in user may make a set number of API requests per minute (default 240); excess requests get HTTP 429 with a plain message.
+- **Reading limits:** pages per user per day, reading jobs per user per hour, maximum pages per job, and an organisation monthly budget in US dollars. All are Administrator settings, checked before each job against an append-only usage ledger (model, pages, tokens and cost of every call).
+- **Credits:** the Administrator buys credits on OpenRouter. Nebula shows the OpenRouter balance, the month's spend against the budget, and spend per user, and warns below a low-balance threshold. When credits or the budget run out, reading stops with a clear message and Requisition Assistants enter lines by hand; nothing else is blocked.
+- **Selling credits to clients** (Paystack or Flutterwave checkout adding to an organisation's allowance) is a later step that requires multi-organisation support.
 
 ---
 
