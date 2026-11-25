@@ -12,8 +12,36 @@ import type { MasterData, Requisition } from "../domain/types";
 
 type Tab = "ofr" | "facilities" | "items" | "programmes" | "lifecycle" | "frequency";
 
+/** One CSV row per requested line under the current filters, for pivoting in a spreadsheet. */
+function linesCsv(lines: LineMetrics[], md: MasterData): string {
+  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const head = [
+    "Requisition", "Facility", "LGA", "Programme", "Item code", "Item", "Requisition date", "Received at", "Record status", "Fulfillment status",
+    "Requested (as written)", "Unit", "Requested (base)", "Base unit",
+    "Invoiced credited", "Issued credited", "Delivered credited", "Over-fulfilled (issued)",
+    "Eligible for Issued OFR", "Excluded because", "Substitution",
+  ];
+  const rows = lines.map((lm) => {
+    const r = lm.req;
+    const l = lm.line;
+    const fac = md.facilities[r.facilityId ?? ""];
+    const item = md.items[l.itemId ?? ""];
+    const st = lm.stages;
+    const sub = (["invoiced", "issued", "delivered"] as const).some((s) => st[s].uncreditedSubstitution) ? "uncredited"
+      : (["invoiced", "issued", "delivered"] as const).some((s) => st[s].substituteCredited) ? "credited" : "";
+    return [
+      r.number, fac?.name ?? "", fac?.lga ?? "", md.programmes[l.programmeId ?? ""]?.name ?? "", item?.code ?? "", itemLabel(item),
+      r.requisitionDate ?? "", r.receivedAt, r.recordStatus, r.fulfillmentStatus,
+      l.quantityRequested ?? "", l.unitRequested ?? "", st.issued.eligible ? st.issued.requested : l.baseQuantityRequested ?? "", l.baseUnit ?? "",
+      st.invoiced.eligible ? st.invoiced.credited : "", st.issued.eligible ? st.issued.credited : "", st.delivered.eligible ? st.delivered.credited : "",
+      st.issued.eligible ? st.issued.over : "", st.issued.eligible ? "yes" : "no", st.issued.exclusion ?? "", sub,
+    ].map(esc).join(",");
+  });
+  return [head.map(esc).join(","), ...rows].join("\n");
+}
+
 export function AnalyticsPage(_p: { id?: string }) {
-  const { state } = useApp();
+  const { state, svc, run } = useApp();
   const { filter, bar } = useFilters({ facility: true, programme: true, item: true });
   const [tab, setTab] = useState<Tab>("ofr");
   const [bucket, setBucket] = useState<Bucket>("month");
@@ -29,6 +57,11 @@ export function AnalyticsPage(_p: { id?: string }) {
           <h1>Analytics</h1>
           <p className="sub">Order Fulfillment Rate, drop-off, bottlenecks and frequency across facilities, items and programmes.</p>
         </div>
+        {lines.length > 0 && (
+          <button className="btn" onClick={() => run(() => svc.saveFile(`nebula-lines-${filter.scope}-${filter.from ?? "all"}-${filter.to ?? "now"}.csv`, linesCsv(lines, md)))}>
+            Export lines (CSV)
+          </button>
+        )}
       </div>
       {bar}
       <Tabs<Tab>

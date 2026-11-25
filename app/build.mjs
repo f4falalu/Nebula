@@ -51,6 +51,10 @@ if (process.argv.includes("--web")) {
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Nebula Requisitions</title>
 <meta name="description" content="Requisition lifecycle and fulfillment audit">
+<meta name="theme-color" content="#0c6b58">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
 ${FONTS}
 <link rel="stylesheet" href="/assets/${cssName}">
 </head>
@@ -61,6 +65,8 @@ ${FONTS}
 </html>
 `;
   writeFileSync("dist/web/index.html", html);
+  // Static files served as-is at the site root (PWA manifest and icon).
+  for (const f of readdirSync("public")) writeFileSync(`dist/web/${f}`, readFileSync(`public/${f}`));
   const size = Object.values(result.metafile.outputs).reduce((s, o) => s + o.bytes, 0);
   console.log(`dist/web/ index.html + ${Object.keys(result.metafile.outputs).length} JS files (${(size / 1024).toFixed(0)} KB) + ${cssName}`);
   process.exit(0);

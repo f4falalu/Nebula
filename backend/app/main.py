@@ -2,7 +2,9 @@
 under /files, and the built React app for every other path."""
 from __future__ import annotations
 
+import contextlib
 import logging
+import mimetypes
 import os
 
 import psycopg
@@ -18,7 +20,62 @@ from .core.ratelimit import api_bucket
 from .core.state import load_master, load_proposals, load_requisitions, load_roles, load_users
 
 log = logging.getLogger("nebula")
-app = FastAPI(title="Nebula", version="2.0.0", docs_url="/api/docs" if settings.dev else None, redoc_url=None, openapi_url="/api/openapi.json" if settings.dev else None)
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+
+
+@contextlib.asynccontextmanager
+async def lifespan(_: FastAPI):
+    applied = migrate()
+    if applied:
+        log.warning("applied migrations: %s", applied)
+    os.makedirs(settings.storage_dir, exist_ok=True)
+    if settings.run_worker:
+        from .worker import start_worker
+
+        start_worker()
+    yield
+
+
+app = FastAPI(title="Nebula", version="2.0.0", lifespan=lifespan, docs_url="/api/docs" if settings.dev else None, redoc_url=None,
+              openapi_url="/api/openapi.json" if settings.dev else None)
+
+
+def _csp() -> str:
+    clerk = f" {settings.clerk_issuer}" if settings.clerk_issuer else ""
+    return "; ".join([
+        "default-src 'self'",
+        f"script-src 'self' https://cdnjs.cloudflare.com https://challenges.cloudflare.com{clerk}",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
+        "img-src 'self' data: blob: https://img.clerk.com",
+        f"connect-src 'self' https://cdnjs.cloudflare.com{clerk} https://clerk-telemetry.com",
+        "frame-src https://challenges.cloudflare.com",
+        "worker-src 'self' blob:",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    ])
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    h = response.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    h.setdefault("X-Frame-Options", "DENY")
+    h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+    if not settings.dev:
+        h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    if request.url.path.startswith("/api/"):
+        h.setdefault("Cache-Control", "no-store")
+    elif request.url.path.startswith("/files/"):
+        # Stored files are shown, never run as a page.
+        h.setdefault("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'")
+    else:
+        h.setdefault("Content-Security-Policy", _csp())
+    return response
 
 
 def api_actor(request: Request) -> Actor:
@@ -38,18 +95,6 @@ async def db_rule(_: Request, e: psycopg.errors.RaiseException):
 async def db_integrity(_: Request, e: psycopg.errors.IntegrityError):
     log.warning("integrity error: %s", e)
     return JSONResponse({"detail": "The change was refused because it breaks a data rule."}, status_code=409)
-
-
-@app.on_event("startup")
-def startup() -> None:
-    applied = migrate()
-    if applied:
-        log.warning("applied migrations: %s", applied)
-    os.makedirs(settings.storage_dir, exist_ok=True)
-    if settings.run_worker:
-        from .worker import start_worker
-
-        start_worker()
 
 
 @app.get("/api/health")
@@ -98,7 +143,10 @@ def file(doc_id: str, u: str, e: int, d: int, s: str):
             audit(conn, u, "document.downloaded", "document", doc_id, requisition_id=doc["requisition_id"])
     headers = {"Cache-Control": "private, max-age=300"}
     if d:
-        headers["Content-Disposition"] = f'attachment; filename="{doc["file_name"]}"'
+        from urllib.parse import quote
+
+        safe = "".join(c for c in doc["file_name"] if c.isalnum() or c in " ._-()") or "document"
+        headers["Content-Disposition"] = f"attachment; filename=\"{safe}\"; filename*=UTF-8''{quote(doc['file_name'])}"
     return Response(storage.get(doc["storage_key"]), media_type=doc["mime_type"], headers=headers)
 
 

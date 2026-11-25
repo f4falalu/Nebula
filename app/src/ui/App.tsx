@@ -65,7 +65,7 @@ export function App() {
     ["analytics", "Analytics"],
     ...(can(actor, "edit_request.approve") || actor.role === "admin" ? [["approvals", "Approvals", pendingApprovals] as [string, string, number]] : []),
     ...(can(actor, "audit.global") ? [["audit", "Audit log"] as [string, string]] : []),
-    ...(actor.role === "admin" ? [["admin", "Administration"] as [string, string]] : []),
+    ...(actor.role === "admin" ? [["admin", "Administration", (state.users ?? []).filter((u) => u.status === "pending").length] as [string, string, number]] : []),
   ];
   const active = { req: "requisitions", facility: "facilities", item: "items", programme: "programmes" }[route.name] ?? route.name;
 

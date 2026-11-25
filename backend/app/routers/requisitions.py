@@ -172,7 +172,24 @@ def _read_upload(f: UploadFile) -> tuple[bytes, str]:
         raise UserError(f"{name} is larger than 20 MB.")
     if not data:
         raise UserError(f"{name} is empty.")
+    if sniff_type(data) != mime:
+        raise UserError(f"{name}: the file's contents don't match its type. Use a real JPEG, PNG, WebP, GIF or PDF file.")
     return data, mime
+
+
+def sniff_type(data: bytes) -> str | None:
+    """Identify the file from its first bytes, so a renamed file can't pass as an image or PDF."""
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data.lstrip()[:5] == b"%PDF-":
+        return "application/pdf"
+    return None
 
 
 def _page_count(data: bytes, mime: str) -> int:

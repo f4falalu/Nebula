@@ -247,11 +247,32 @@ def process_one() -> bool:
     return True
 
 
+def expire_edit_requests() -> int:
+    """Write back edit requests whose approval window or pending timeout has passed (status 'expired')."""
+    from .core.state import load_settings
+
+    with tx() as conn:
+        days = int(load_settings(conn)["editRequestPendingTimeoutDays"])
+        rows = conn.execute(
+            """UPDATE edit_requests SET status='expired', closed_at=now(), closure_reason='expired'
+               WHERE (status='approved' AND approval_expires_at <= now() AND used_at IS NULL)
+                  OR (status='pending' AND requested_at <= now() - make_interval(days => %s))
+               RETURNING id, requisition_id, status""", (days,)).fetchall()
+        for r in rows:
+            audit(conn, None, "edit_request.expired", "edit_request", r["id"], requisition_id=r["requisition_id"],
+                  edit_request_id=r["id"], system=True)
+        return len(rows)
+
+
 def _loop() -> None:
+    last_housekeeping = 0.0
     while True:
         try:
             while process_one():
                 pass
+            if time.time() - last_housekeeping > 60:
+                last_housekeeping = time.time()
+                expire_edit_requests()
         except Exception:
             log.exception("worker iteration failed")
         time.sleep(2)
