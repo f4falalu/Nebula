@@ -5,18 +5,27 @@ Requisition Lifecycle & Fulfillment Audit Platform. It records each healthcare r
 - Product requirements: [`docs/PRD.md`](docs/PRD.md)
 - How V1 implements them, and its limits: [`docs/V1.md`](docs/V1.md)
 
-## V1
+## V2 (web app on Render)
+
+FastAPI + PostgreSQL backend (`backend/`) with the PRD's rules enforced in the database, Clerk sign-in, OpenRouter document reading with per-user limits and a monthly budget, and the React app (`app/`) built for the web. Deploy with `render.yaml`; step-by-step guide: [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
+## V1 (claude.ai artifact)
 
 V1 runs as a claude.ai artifact: one page with a shared database, file storage and Claude-assisted document reading. Share the artifact to give people access; their share level sets their role (Editor = Administrator, Contributor = Requisition Assistant, Viewer = Supervisor).
 
 ## Develop
 
 ```bash
+cd backend && python -m pytest -q   # V2 API tests (needs a local PostgreSQL)
+```
+
+```bash
 cd app
 npm install
 npm test          # domain rule tests
 npm run typecheck
-npm run build     # writes dist/nebula.html
+npm run build     # V1: writes dist/nebula.html
+npm run build:web # V2: writes dist/web/
 node e2e/smoke.mjs  # end-to-end run in headless Chromium (preview mode)
 ```
 
